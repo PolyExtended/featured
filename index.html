@@ -5,30 +5,77 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Twitch Featured List</title>
     
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css">
+
     <!-- Materialize CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
 
     <!-- Materialize Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="https://polyextended.github.io/nav.css">
+    <style>
+        .col.s12.m6 {
+            flex: 0 0 calc(33.33% - 20px);
+            margin: 10px;
+            max-width: calc(33.33% - 20px);
+        }
+
+        .badge-live {
+            background-color: #28a745;
+        }
+
+        .badge-offline {
+            background-color: #6c757d;
+            border-radius: 15px;
+        }
+
+        #jsonData {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
 </head>
 <body>
+    <header class="z-depth-1">
+        <nav class="z-depth-0 backer-dark">
+            <div class="nav-wrapper container">
+                <ul class="left">
+                    <li><a href="https://polyextended.github.io/">Home</a></li>
+                    <li><a href="https://polyextended.github.io/live/">PolyLive</a></li>
+                    <li><a href="https://polyextended.github.io/streamlookup/">PolyLookup</a></li>
+                </ul>
+            </div>
+        </nav>
+    </header>
+
     <div class="container">
         <h4>Twitch Featured List</h4>
         <ul class="collection" id="featuredList"></ul>
+        <div id="jsonData"></div>
     </div>
 
     <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/js/bootstrap.min.js"></script>
 
     <script>
         const clientId = '2oag632o0mp6n85h3mismr2ocsa1jip';
         const accessToken = '62ly1aqjnymr30sn6yga5xpxuo4yi9';
-        const twitchCategory = 'grandtheftautov';
+        const featuredList = document.getElementById('featuredList');
+        const jsonDataDiv = document.getElementById('jsonData');
+        const rotateInterval = 3 * 60 * 1000;  // Rotate every 3 minutes
         let isRendered = false;
+        let currentIndex = 0;
 
-        async function getTwitchStreams() {
+        async function getTwitchStreams(username) {
             try {
-                const response = await fetch(`https://api.twitch.tv/helix/streams?game_id=${twitchCategory}`, {
+                const response = await fetch(`https://api.twitch.tv/helix/streams?user_login=${username}`, {
                     method: 'GET',
                     headers: {
                         'Client-ID': clientId,
@@ -38,26 +85,32 @@
                 const data = await response.json();
                 return data.data;
             } catch (error) {
-                console.error('Error fetching Twitch API:', error);
+                console.error(`Error fetching Twitch API for ${username}:`, error);
                 return null;
             }
         }
 
-        async function getFallbackUsernames() {
+        async function getTwitchUsernames() {
             try {
-                const response = await fetch('https://polyextended.github.io/lookup/twitch.json');
+                const response = await fetch('twitch.json');
                 const data = await response.json();
-                return data.fallbackUsernames || [];
+                jsonDataDiv.innerHTML += '<p>Twitch usernames: ' + (data.Users || []).join(', ') + '</p>';
+                return data.Users || [];
             } catch (error) {
-                console.error('Error fetching fallback usernames:', error);
+                console.error('Error fetching Twitch usernames:', error);
                 return [];
             }
         }
 
         async function getBannedUsers() {
-            const bannedResponse = await fetch('https://polyextended.github.io/lookup/banned.json');
-            const bannedData = await bannedResponse.json();
-            return bannedData.Users;
+            try {
+                const response = await fetch('banned.json');
+                const data = await response.json();
+                return data.BannedUsers || [];
+            } catch (error) {
+                console.error('Error fetching banned users:', error);
+                return [];
+            }
         }
 
         async function isUserBanned(username) {
@@ -66,78 +119,53 @@
         }
 
         async function renderFeaturedList() {
-            if (isRendered) {
-                return;
-            }
+            const twitchUsernames = await getTwitchUsernames();
 
-            let streams = await getTwitchStreams();
-            const featuredList = document.getElementById('featuredList');
-
-            if (!streams) {
-                // Use fallback list from twitch.json
-                const fallbackUsernames = await getFallbackUsernames();
-                streams = fallbackUsernames.map(username => ({ user_name: username }));
-            }
-
-            if (streams.length > 0) {
-                // Select a random featured streamer
-                const randomIndex = Math.floor(Math.random() * streams.length);
-                const randomStreamer = streams[randomIndex];
-                
-                const username = randomStreamer.user_name;
+            for (let i = 0; i < twitchUsernames.length; i++) {
+                const username = twitchUsernames[currentIndex];
 
                 if (await isUserBanned(username)) {
                     console.log(`${username} is banned and will not be featured.`);
-                    return;
+                    currentIndex = (currentIndex + 1) % twitchUsernames.length;
+                    continue;
                 }
 
-                const listItem = document.createElement('li');
-                listItem.classList.add('collection-item');
-                listItem.innerHTML = `<span class="title">${username}</span><p>${randomStreamer.title || ''}</p>`;
-                featuredList.appendChild(listItem);
+                const streams = await getTwitchStreams(username);
 
-                // Save the username to localStorage
-                saveUsernameToLocalStorage(username);
+                if (streams && streams.length > 0) {
+                    const randomIndex = Math.floor(Math.random() * streams.length);
+                    const randomStreamer = streams[randomIndex];
+                    const displayName = randomStreamer.user_name;
 
-                // Add the username to twitch.json
-                addUsernameToTwitchJson(username);
+                    const listItem = document.createElement('li');
+                    listItem.classList.add('collection-item');
 
-                isRendered = true;
+                    // Check if the streamer is live
+                    const isLive = randomStreamer.type === 'live';
+                    const badgeClass = isLive ? 'badge-live' : 'badge-offline';
+                    const badgeText = isLive ? 'Live' : 'Offline';
+
+                    listItem.innerHTML = `
+                        <span class="title">${displayName}</span>
+                        <p>${randomStreamer.title || ''}</p>
+                        <span class="badge ${badgeClass}">${badgeText}</span>
+                    `;
+
+                    featuredList.innerHTML = '';  // Clear the list before adding the new name
+                    featuredList.appendChild(listItem);
+
+                    isRendered = true;
+                    currentIndex = (currentIndex + 1) % twitchUsernames.length;
+                    break;  // Show only one name
+                } else {
+                    currentIndex = (currentIndex + 1) % twitchUsernames.length;
+                }
             }
-        }
-
-        function saveUsernameToLocalStorage(username) {
-            const savedUsernames = JSON.parse(localStorage.getItem('twitchUsernames')) || [];
-            savedUsernames.push(username);
-            localStorage.setItem('twitchUsernames', JSON.stringify(savedUsernames));
-        }
-
-        function addUsernameToTwitchJson(username) {
-            // Fetch the existing data from twitch.json
-            fetch('https://polyextended.github.io/lookup/twitch.json')
-                .then(response => response.json())
-                .then(data => {
-                    // Add the new username to the array
-                    data.fallbackUsernames = data.fallbackUsernames || [];
-                    data.fallbackUsernames.push(username);
-
-                    // Update twitch.json with the new data
-                    fetch('https://polyextended.github.io/lookup/twitch.json', {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(data)
-                    })
-                    .then(response => response.json())
-                    .then(updatedData => console.log('Updated twitch.json:', updatedData))
-                    .catch(error => console.error('Error updating twitch.json:', error));
-                })
-                .catch(error => console.error('Error fetching twitch.json:', error));
         }
 
         document.addEventListener('DOMContentLoaded', function () {
             renderFeaturedList();
+            setInterval(renderFeaturedList, rotateInterval);
         });
     </script>
 </body>
